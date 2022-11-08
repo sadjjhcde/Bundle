@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Bolls</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@700&display=swap');
+        body {
+            margin: 0;
+            overflow: hidden
+        }
+        #restart {
+            position: fixed;
+            bottom: 150px;
+            left: 50%;
+            transform: translateX(-50%) scale(150%);
+            display: none;
+        }
+
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <img src="restart.png" id="restart">
+</body>
+<script>
+
+    let canvas = document.getElementById('canvas');
+    let context = canvas.getContext("2d");
+    let restart = document.getElementById('restart');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let centerX = canvas.width / 2;
+    let centerY = canvas.height / 2;
+    let playerX = centerX;
+    let playerY = centerY;
+    let impulseX = 0;
+    let impulseY = 0;
+    let cursorX = playerX;
+    let cursorY = playerY;
+    let offsetX = 0;
+    let offsetY = 0;
+    let dead = false;
+    let win = false;
+
+    let wrecks = [];
+    let targets = [];
+    let targetsWrecks = [];
+    let enemies = [];
+
+    let FIELD_RADIUS = 1500;
+    let PLAYER_RADIUS = 15;
+    let WRECK_RADIUS = 5;
+    let TARGET_RADIUS = 15;
+    let PLAYER_MOVE = 0.7;
+    let MAX_IMPULSE = 6;
+    let WRECK_MOVE_RATIO = 0.01;
+    let WRECK_PLAYER_MOVE_RATIO = 0.2;
+    let TARGET_MOVE_RATIO = 0.005;
+    let PLAYER_COLLIDE_TARGET_RATIO = 0.05;
+    let TARGET_BORDER_COLLIDE_RATIO = 0.001 
+
+    for (let i = 0; i < 25; i++) { 
+        let target = {};
+        target.x = centerX + (Math.floor(Math.random() * 100) - 50);
+        target.y = centerY - 750 + (Math.floor(Math.random() * 100) - 50);
+        target.impulseX = 0;
+        target.impulseY = 0;
+        targets.push(target);
+    }
+
+    for (let i = 0; i < 25; i++) { 
+        let target = {};
+        target.x = centerX + (Math.floor(Math.random() * 100) - 50);
+        target.y = centerY + 750 + (Math.floor(Math.random() * 100) - 50);
+        target.impulseX = 0;
+        target.impulseY = 0;
+        targets.push(target);
+    }
+
+    for (let i = 0; i < 15; i++) { 
+        let enemy = {};
+        enemy.x = centerX - 750 + (Math.floor(Math.random() * 100) - 50);
+        enemy.y = centerY + (Math.floor(Math.random() * 100) - 50);
+        enemy.impulseX = 0;
+        enemy.impulseY = 0;
+        enemies.push(enemy);
+    }
+
+    for (let i = 0; i < 15; i++) { 
+        let enemy = {};
+        enemy.x = centerX + 750 + (Math.floor(Math.random() * 100) - 50);
+        enemy.y = centerY + (Math.floor(Math.random() * 100) - 50);
+        enemy.impulseX = 0;
+        enemy.impulseY = 0;
+        enemies.push(enemy);
+    }
+
+    function onMouseMove(event) {
+        cursorX = event.clientX;
+        cursorY = event.clientY;
+    }
+    document.onmousemove = onMouseMove;
+
+    restart.addEventListener('click', function() {
+        window.location.reload();
+    });
+
+    function tick() {
+        //background draw
+        context.fillStyle = "#858585";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+
+        //game field draw
+        context.beginPath();
+        context.arc(centerX + offsetX, centerY + offsetY, FIELD_RADIUS, 0, 2 * Math.PI, false);
+        context.fillStyle = '#e7e7e7';  
+        context.fill();
+
+        //draw targets count
+        context.font = '40px roboto';
+        context.fillStyle = '#228B22';
+        context.fillText((50 - targets.length) + ' / 50',canvas.width - 170, 80);
+
+        //grid draw
+        context.strokeStyle = '#858585';  
+        context.lineWidth = 1.5;
+        for (let i = -5; i <= 5; i++) { 
+            for (let j = -5; j <= 5; j++) { 
+                let gridPointX = i * 300;
+                let gridPointY = j * 300;
+                context.beginPath();
+                context.moveTo(gridPointX - 5 + offsetX + centerX, gridPointY + offsetY + centerY);
+                context.lineTo(gridPointX + 5 + offsetX + centerX, gridPointY + offsetY + centerY);
+                context.stroke();
+                context.beginPath();
+                context.moveTo(gridPointX + offsetX + centerX, gridPointY - 5 + offsetY + centerY);
+                context.lineTo(gridPointX + offsetX + centerX, gridPointY + 5 + offsetY + centerY);
+                context.stroke();
+            }
+        }
+
+        //draw player wrecks
+        for (let i = 0; i < wrecks.length; i++) { 
+            let wreck = wrecks[i];
+            context.beginPath();
+            context.arc(wreck.x + offsetX, wreck.y + offsetY, WRECK_RADIUS, 0, 2 * Math.PI, false);
+            context.fillStyle = 'rgba(31,81,255,' + wreck.opacity / 100 + ')';
+            context.fill();
+        }
+
+        //draw target wrecks
+        for (let i = 0; i < targetsWrecks.length; i++) { 
+            let wreck = targetsWrecks[i];
+            context.beginPath();
+            context.arc(wreck.x + offsetX, wreck.y + offsetY, WRECK_RADIUS, 0, 2 * Math.PI, false);
+            context.fillStyle = 'rgba(50,205,50,' + wreck.opacity / 100 + ')';
+            context.fill();
+        }
+
+        //draw targets
+        for (let i = 0; i < targets.length; i++) { 
+            let target = targets[i];
+            context.beginPath();
+            context.arc(target.x + offsetX, target.y + offsetY, TARGET_RADIUS, 0, 2 * Math.PI, false);
+            context.fillStyle = '#32cd32';
+            context.fill();
+        }
+
+        //draw enemies
+        for (let i = 0; i < enemies.length; i++) { 
+            let enemy = enemies[i];
+            context.beginPath();
+            context.arc(enemy.x + offsetX, enemy.y + offsetY, TARGET_RADIUS, 0, 2 * Math.PI, false);
+            context.fillStyle = '#DC143C';
+            context.fill();
+        }
+
+        //draw player
+        if (!dead) {
+            context.beginPath();
+            context.arc(playerX + offsetX, playerY + offsetY, PLAYER_RADIUS, 0, 2 * Math.PI, false);
+            context.fillStyle = '#1F51FF';
+            context.fill();
+        }
+
+        //draw win and dead text
+        if (win) {
+            context.font = '100px roboto';
+            context.textAlign = 'center';
+            context.fillStyle = '#228B22';
+            context.fillText('MOLOTCA ODOBRYAEM',canvas.width / 2, 300);
+        } else if(dead) {
+            context.font = '100px roboto';
+            context.textAlign = 'center';
+            context.fillStyle = '#880808';
+            context.fillText('YOU DED LOL',canvas.width / 2, 300);
+        }
+
+
+        //check win
+        if (!dead && targets.length == 0) {
+            win = true;
+        }
+        //player move
+        let dx = cursorX - centerX;
+        let dy = cursorY - centerY;
+        if (dx != 0 && dy != 0 && !dead) {
+            let playerRatio = PLAYER_MOVE / Math.sqrt(Math.pow(dx, 2) + Math.pow(dy, 2));
+            let moveX = playerRatio * dx;
+            let moveY = playerRatio * dy;
+            impulseX = impulseX + moveX;
+            impulseY = impulseY + moveY;
+
+            let impulse = Math.sqrt(Math.pow(impulseX, 2) + Math.pow(impulseY, 2));
+            if (impulse > MAX_IMPULSE) {
+                let impulseRatio = MAX_IMPULSE / impulse;
+                impulseX *= impulseRatio;
+                impulseY *= impulseRatio;
+            }
+        }
+        playerX += impulseX;
+        playerY += impulseY;
+
+        //offset update
+        offsetX = centerX - playerX;
+        offsetY = centerY - playerY;
+
+        //player border collide
+        let distance = Math.sqrt(Math.pow(offsetX, 2) + Math.pow(offsetY, 2));
+        if (distance > FIELD_RADIUS - PLAYER_RADIUS && !dead ) {
+            dead = true;
+            restart.style.display = 'block';
+            for (let i = 0; i < 200; i++) { 
+                let wreck = {};
+                wreck.x = playerX + (Math.floor(Math.random() * 20) - 10);
+                wreck.y = playerY + (Math.floor(Math.random() * 20) - 10);
+                wreck.impulseX = 0;
+                wreck.impulseY = 0;
+                wreck.opacity = Math.floor(Math.random() * 100);
+                wrecks.push(wreck);
+            }
+            impulseX = 0;
+            impulseY = 0;
+        }
+
+        //wrecks collide and move
+        for (let i = 0; i < wrecks.length; i++) { 
+            //collide with other wrecks
+            for (let j = 0; j < wrecks.length; j++) { 
+                let wrecksDistance = Math.sqrt(Math.pow(wrecks[i].x - wrecks[j].x, 2) + Math.pow(wrecks[i].y - wrecks[j].y, 2));
+                if (wrecksDistance < WRECK_RADIUS * 2) {
+                    wrecks[i].impulseX += (wrecks[i].x - wrecks[j].x) * WRECK_MOVE_RATIO;
+                    wrecks[i].impulseY += (wrecks[i].y - wrecks[j].y) * WRECK_MOVE_RATIO;
+                    wrecks[j].impulseX += (wrecks[j].x - wrecks[i].x) * WRECK_MOVE_RATIO;
+                    wrecks[j].impulseY += (wrecks[j].y - wrecks[i].y) * WRECK_MOVE_RATIO;
+                }
+            }
+            //collide with border
+            let wreckDistance = Math.sqrt(Math.pow(centerX - wrecks[i].x, 2) + Math.pow(centerY - wrecks[i].y, 2));
+            if (wreckDistance > FIELD_RADIUS - WRECK_RADIUS) {
+                wrecks.splice(i, 1);
+                i--;
+                continue;
+            }
+
+            //remove colored out 
+            wrecks[i].opacity -= 1;
+            if (wrecks[i].opacity <= 0) {
+                wrecks.splice(i, 1);
+                i--;
+                continue;
+            }
+
+            //move
+            wrecks[i].x += wrecks[i].impulseX;
+            wrecks[i].y += wrecks[i].impulseY;
+        }
+
+        //targets collide and move
+        for (let i = 0; i < targets.length; i++) { 
+            //collide with other targets
+            for (let j = 0; j <targets.length; j++) { 
+                let targetsDistance = Math.sqrt(Math.pow(targets[i].x - targets[j].x, 2) + Math.pow(targets[i].y - targets[j].y, 2));
+                if (targetsDistance < TARGET_RADIUS * 2) {
+                    targets[i].impulseX += (targets[i].x - targets[j].x) * TARGET_MOVE_RATIO;
+                    targets[i].impulseY += (targets[i].y - targets[j].y) * TARGET_MOVE_RATIO;
+                    targets[j].impulseX += (targets[j].x - targets[i].x) * TARGET_MOVE_RATIO;
+                    targets[j].impulseY += (targets[j].y - targets[i].y) * TARGET_MOVE_RATIO;
+                }
+            }
+            //collide with border
+            let targetDistance = Math.sqrt(Math.pow(centerX - targets[i].x, 2) + Math.pow(centerY - targets[i].y, 2));
+            if (targetDistance > FIELD_RADIUS - TARGET_RADIUS) {
+                targets[i].impulseX -= (targets[i].x - centerX) * TARGET_BORDER_COLLIDE_RATIO;
+                targets[i].impulseY -= (targets[i].y - centerY) * TARGET_BORDER_COLLIDE_RATIO;
+            }
+
+            //collide with enemies
+            for (let j = 0; j < enemies.length; j++) { 
+                let enemiesDistance = Math.sqrt(Math.pow(enemies[j].x - targets[i].x, 2) + Math.pow(enemies[j].y - targets[i].y, 2));
+                if (enemiesDistance < TARGET_RADIUS * 2) {
+                    enemies[j].impulseX += (enemies[j].x - targets[i].x) * TARGET_MOVE_RATIO;
+                    enemies[j].impulseY += (enemies[j].y - targets[i].y) * TARGET_MOVE_RATIO;
+                    targets[i].impulseX += (targets[i].x - enemies[j].x) * TARGET_MOVE_RATIO;
+                    targets[i].impulseY += (targets[i].y - enemies[j].y) * TARGET_MOVE_RATIO;
+                }    
+            }
+
+            //collide with player
+            let playerDistance = Math.sqrt(Math.pow(playerX - targets[i].x, 2) + Math.pow(playerY - targets[i].y, 2));
+            if (playerDistance < PLAYER_RADIUS + TARGET_RADIUS && !dead) {
+
+                for (let j = 0; j < 100; j++) { 
+                    let targetWreck = {};
+                    targetWreck.x = targets[i].x + (Math.floor(Math.random() * 20) - 10);
+                    targetWreck.y = targets[i].y + (Math.floor(Math.random() * 20) - 10);
+                    targetWreck.impulseX = 0;
+                    targetWreck.impulseY = 0;
+                    targetWreck.opacity = Math.floor(Math.random() * 100);
+                    targetsWrecks.push(targetWreck);
+                }
+
+                //move player in collide with targer
+                // impulseX -= (impulseX - targets[i].x) * PLAYER_COLLIDE_TARGET_RATIO;
+                // impulseY -= (impulseY - targets[i].y) * PLAYER_COLLIDE_TARGET_RATIO;
+
+                targets.splice(i, 1);
+                i--;
+                continue;
+            }
+            //move
+            targets[i].x += targets[i].impulseX;
+            targets[i].y += targets[i].impulseY;
+        }
+
+        //targets wrecks collide and move
+        for (let i = 0; i < targetsWrecks.length; i++) { 
+            //collide with other targets
+            for (let j = 0; j <targetsWrecks.length; j++) { 
+                let targetsWrecksDistance = Math.sqrt(Math.pow(targetsWrecks[i].x - targetsWrecks[j].x, 2) + Math.pow(targetsWrecks[i].y - targetsWrecks[j].y, 2));
+                if (targetsWrecksDistance < WRECK_RADIUS * 2) {
+                    targetsWrecks[i].impulseX += (targetsWrecks[i].x - targetsWrecks[j].x) * WRECK_MOVE_RATIO;
+                    targetsWrecks[i].impulseY += (targetsWrecks[i].y - targetsWrecks[j].y) * WRECK_MOVE_RATIO;
+                    targetsWrecks[j].impulseX += (targetsWrecks[j].x - targetsWrecks[i].x) * WRECK_MOVE_RATIO;
+                    targetsWrecks[j].impulseY += (targetsWrecks[j].y - targetsWrecks[i].y) * WRECK_MOVE_RATIO;
+                }
+            }
+            //collide with border
+            let targetDistance = Math.sqrt(Math.pow(centerX - targetsWrecks[i].x, 2) + Math.pow(centerY - targetsWrecks[i].y, 2));
+            if (targetDistance > FIELD_RADIUS - WRECK_RADIUS) {
+                targetsWrecks.splice(i, 1);
+                i--;
+                continue;
+            }    
+
+            targetsWrecks[i].opacity -= 0.5;
+
+            //remove colored out
+            if (targetsWrecks[i].opacity <= 0) {
+                targetsWrecks.splice(i, 1);
+                i--;
+                continue;
+            } 
+
+            
+            targetsWrecks[i].x += targetsWrecks[i].impulseX;
+            targetsWrecks[i].y += targetsWrecks[i].impulseY;
+        }
+
+        //enemies collide and move
+        for (let i = 0; i < enemies.length; i++) { 
+            //collide with other enemies
+            for (let j = 0; j <enemies.length; j++) { 
+                let enemiesDistance = Math.sqrt(Math.pow(enemies[i].x - enemies[j].x, 2) + Math.pow(enemies[i].y - enemies[j].y, 2));
+                if (enemiesDistance < TARGET_RADIUS * 2) {
+                    enemies[i].impulseX += (enemies[i].x - enemies[j].x) * TARGET_MOVE_RATIO;
+                    enemies[i].impulseY += (enemies[i].y - enemies[j].y) * TARGET_MOVE_RATIO;
+                    enemies[j].impulseX += (enemies[j].x - enemies[i].x) * TARGET_MOVE_RATIO;
+                    enemies[j].impulseY += (enemies[j].y - enemies[i].y) * TARGET_MOVE_RATIO;
+                }
+            }
+            //collide with border
+            let enemyDistance = Math.sqrt(Math.pow(centerX - enemies[i].x, 2) + Math.pow(centerY - enemies[i].y, 2));
+            if (enemyDistance > FIELD_RADIUS - TARGET_RADIUS) {
+                enemies[i].impulseX -= (enemies[i].x - centerX) * TARGET_BORDER_COLLIDE_RATIO;
+                enemies[i].impulseY -= (enemies[i].y - centerY) * TARGET_BORDER_COLLIDE_RATIO;
+            }
+            //collide with player
+            let playerDistance = Math.sqrt(Math.pow(playerX - enemies[i].x, 2) + Math.pow(playerY - enemies[i].y, 2));
+            if (playerDistance < PLAYER_RADIUS + TARGET_RADIUS && !dead) {
+                dead = true;
+                restart.style.display = 'block';
+                for (let i = 0; i < 200; i++) { 
+                    let wreck = {};
+                    wreck.x = playerX + (Math.floor(Math.random() * 20) - 10);
+                    wreck.y = playerY + (Math.floor(Math.random() * 20) - 10);
+                    wreck.impulseX = 0;
+                    wreck.impulseY = 0;
+                    wreck.opacity = Math.floor(Math.random() * 100);
+                    wrecks.push(wreck);
+                }
+                impulseX = 0;
+                impulseY = 0;
+            }
+            //move
+            enemies[i].x += enemies[i].impulseX;
+            enemies[i].y += enemies[i].impulseY;
+        }
+    }
+    setInterval(tick, 15);
+</script>
+</html>
